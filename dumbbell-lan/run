@@ -1,0 +1,212 @@
+#!/usr/bin/env bash
+
+. experiment.sh
+
+remote_hostname=users.isi.deterlab.net
+is_remote=0
+if [ "$(hostname)" == "$remote_hostname" ]; then
+	is_remote=1
+	# echo "--- entering $remote_hostname ---"
+	PATH=$PATH:/usr/testbed/bin/
+fi
+
+f_ping() {
+	for node in $nodes; do
+		node=${node%%,}
+		echo ""
+		echo "-------------"
+		echo "pinging $node"
+		echo "-------------"
+		ping -c 1 $node.$exp.$proj
+		if [ $? != 0 ]; then
+			echo "ping fail on $node"
+			return 1
+		fi
+	done
+	echo ""
+	echo "---------------------"
+	echo "ping is successful"
+	echo ""
+	return 0
+}
+
+f_resolve_nodes() {
+	[ -z "$1" ] && nodes2="$nodes" && return
+	[[ "$1" == @* ]] && eval "nodes2=\"\$${1#@}\"" || nodes2="$1"
+}
+
+f_ssh2() {
+	shell=
+	if [ _$3 == _shell ]; then
+		shell="-t"
+	fi
+	
+	if [ "$2" == 'bash -i' ]; then
+		ssh -t $ssh_addr "cd $home/$exp_path; ssh -o StrictHostKeyChecking=no \
+					-o LogLevel=ERROR -o UserKnownHostsFile=/dev/null $shell $1.$exp.$proj \"cd /tmp/; bash -i\"" 
+	else
+		if [ _$3 == _shell ]; then
+			ssh $ssh_addr "cd $home/$exp_path; ssh -o StrictHostKeyChecking=no \
+					-o LogLevel=ERROR -o UserKnownHostsFile=/dev/null $shell $1.$exp.$proj \"cd /tmp/; $2\""
+		else
+			ssh $ssh_addr "cd $home/$exp_path; ssh -o StrictHostKeyChecking=no \
+					-o LogLevel=ERROR -o UserKnownHostsFile=/dev/null $shell $1.$exp.$proj \"cd /tmp/; $2\"" >/dev/null 2>/dev/null
+		fi
+	fi
+}
+
+f_rsync_node() {
+	node=$1
+	shift
+	rsync -azvvP --ignore-missing-args -e "ssh -A $ssh_addr ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null" "$user@$node.$exp.$proj"$@ 
+}
+
+show_help=0
+
+cmd="$1"
+log() {
+	prefix=local
+	[ $is_remote == 0 ] || prefix=remote
+	echo "[$prefix/$cmd] $1"
+}
+
+if [ $is_remote == 1 ]; then
+	#### REMOTE ####
+	case $cmd in
+	swapin)
+		log "swapping in experiment '$exp'"
+		swapexp $proj $exp in
+		;;
+	swapout)
+		log "swapping out experiment '$exp'"
+		swapexp $proj $exp out
+		;;
+	terminate)
+		log "terminating experiment '$exp'"
+		endexp $proj $exp
+		;;
+	update)
+		log "updating experiment topology"
+		modexp $proj $exp $topology
+		;;
+	ping)
+		log "pinging nodes from gen-aal script"
+		f_ping
+		;;
+	make_exp)
+		log "making experiment"
+		python /share/containers/containerize.py  $containerize_params $proj $exp $topology
+		log "making experiment done"
+		;;
+	reboot)
+		log "rebooting nodes"
+		# node_reboot -e $proj,$exp
+		./run swapout
+		log "waiting some time for nodes to swapout: 60 seconds"
+		sleep 60
+		./run swapin
+		;;
+	orchestrate)
+		log "generating AAL"
+		bash $gen_aal $aal
+		log "pinging nodes from gen-aal script"
+		f_ping
+		[ $? != 0 ] && log "pinging failed (wait for all nodes to be ready and accessible)" && exit 1
+		python /share/magi/current/magi_orchestrator.py -p $proj -e $exp --events $aal
+		[ $? == 0 ] || exit 1
+		log "orchestrator DONE"
+		;;
+	*)
+		show_help=1
+		;;
+	esac
+else
+	case $cmd in
+	#### LOCAL ####
+	swapin|swapout|terminate|update|make_exp|orchestrate|reboot|ping)
+		log "uploading"
+		./run upload
+		log "executing command ./run ${1}"
+		ssh -t $ssh_addr "cd $exp_dir; ./run ${1}"
+		[ $? == 0 ] || exit 1
+		;;
+	experiment)
+		./run orchestrate
+		[ $? == 0 ] || exit 1
+		log "downloading results"	
+		./run download @monitor
+		;;
+	upload)
+		rsync -zr --delete --exclude archive --exclude data ./ $deterhome/$exp_path/
+		if [ -d data ]; then
+			rsync -zr data $deterhome/$exp_path/
+		fi
+		;;
+	download)
+		outdir=output-$(date +%d-%m-%y-%H:%M)
+		mkdir -p archive/$outdir
+		
+		f_resolve_nodes "$2"
+		conn=0
+		rsync -zr --ignore-missing-args $deterhome/$exp_path/$aal $deterhome/$exp_path/data  archive/$outdir/
+		for node in $nodes2; do
+			node=${node%%,}
+			mkdir -p archive/$outdir/$node/
+			
+			( f_rsync_node $node ":/tmp/*.gz" ":/tmp/*.json" archive/$outdir/$node/ ) >/dev/null 2>&1 &
+			conn=$(($conn+1))
+			if [ $(($conn%8 == 0)) == 1 ]; then
+				wait
+			fi
+		done
+		wait
+		;;
+	ssh)
+		if [ $# -ge 2 ]; then
+			interactive="bash -i"
+			ssh_cmd="$interactive"
+			shell="shell"
+			if [ $# -ge 3 ]; then
+				ssh_cmd="$3"
+				shell=
+			fi
+			[ _$4 == _shell ] && shell="shell"
+			
+			f_resolve_nodes "$2"
+			for node in $nodes2; do
+				node=${node%%,}
+				log "ssh to node $node: $ssh_cmd";
+				if [ ! -z $shell ]; then
+					f_ssh2 $node "$ssh_cmd" $shell
+				else
+					f_ssh2 $node "$ssh_cmd" &
+				fi
+			done
+		else
+			ssh -t $ssh_addr "cd $home/$exp_path; bash -i"
+		fi
+		;;
+	*)
+		show_help=1
+		;;
+	esac
+fi
+
+if [ $show_help == 1 ]; then
+	cat <<EOF
+experiment $exp
+
+	./run upload
+	./run make_exp
+	./run terminate
+	./run swapin
+	./run swapout
+	./run reboot
+	./run ping
+	./run orchestrate
+	./run experiment
+	./run download [<node-name>|<@group>]
+	./run ssh [<node-name>|<@group>] [<command>] [shell]
+	./run ssh  => logs in to users.isi.deterlab.net
+EOF
+fi
