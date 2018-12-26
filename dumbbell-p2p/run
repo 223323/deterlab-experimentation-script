@@ -133,7 +133,7 @@ else
 	experiment)
 		./run orchestrate
 		[ $? == 0 ] || exit 1
-		log "downloading results"	
+		log "downloading results"
 		./run download @monitor
 		;;
 	upload)
@@ -153,7 +153,7 @@ else
 			node=${node%%,}
 			mkdir -p archive/$outdir/$node/
 			
-			( f_rsync_node $node ":/tmp/*.gz" ":/tmp/*.json" archive/$outdir/$node/ ) >/dev/null 2>&1 &
+			( f_rsync_node $node ":/tmp/output/*" archive/$outdir/$node/ ) >/dev/null 2>&1 &
 			conn=$(($conn+1))
 			if [ $(($conn%8 == 0)) == 1 ]; then
 				wait

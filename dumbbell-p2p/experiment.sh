@@ -1,12 +1,13 @@
 user=ftnunsaa
 proj=DOSTRACE
-exp=dumbbell-p2p
+exp=dumbbell-p2p2
 
-# containerize_params="--pnode-type bpc2133"
-containerize_params=
+containerize_params="--pnode-type bpc2133"
+#containerize_params=
 
-
-### NODES
+#######################################
+############## NODES ##################
+#######################################
 servers=""
 clients=""
 
@@ -36,7 +37,7 @@ servers=${servers:1}
 tcpdump_expr=${tcpdump_expr:4}
 
 routers="router-1, router-2"
-monitor="$clients, $routers, $attackers"
+monitor="$clients, $routers, $attackers, $servers"
 nodes="$clients, $routers, $attackers, $servers"
 
 
@@ -56,4 +57,4 @@ datadir=$exp_dir/data
 outdir=$exp_dir/output
 archivedir=$exp_dir/archive
 mods=/share/magi/modules
-#############################
+#######################################

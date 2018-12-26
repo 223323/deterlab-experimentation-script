@@ -17,7 +17,3 @@ while running:
 	with open('/tmp/test_cmd.log','a+') as f:
 		f.write(time.strftime('%X %x %Z')+'\n')
 	time.sleep(1)
-
-
-
-
