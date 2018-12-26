@@ -219,7 +219,8 @@ void *flood(void *par1) {
             sendto(s, datagram, iph->tot_len, 0, (struct sockaddr *) &sin, sizeof(sin));
         }
         
-        usleep(10000);
+        // usleep(10000);
+        usleep(1000);
         
         // break;
 	}

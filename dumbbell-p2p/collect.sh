@@ -12,4 +12,8 @@ if [ _$1 == _cleanup ]; then
 else
 	# compress cap files
 	cd /tmp/ ; find -regextype sed -regex '.*\.cap[0-9]*' -exec gzip {} \;
+	mkdir -p output
+	mv *.gz output/
+	mv *.txt output/
+	ip addr > output/ipaddr.txt
 fi
