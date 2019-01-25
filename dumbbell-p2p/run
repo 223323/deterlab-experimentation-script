@@ -98,6 +98,11 @@ if [ $is_remote == 1 ]; then
 		python /share/containers/containerize.py  $containerize_params $proj $exp $topology
 		log "making experiment done"
 		;;
+	make_normal_exp)
+		log "making experiment"
+		startexp $proj $exp $topology
+		log "making experiment done"
+		;;
 	reboot)
 		log "rebooting nodes"
 		# node_reboot -e $proj,$exp
@@ -123,7 +128,7 @@ if [ $is_remote == 1 ]; then
 else
 	case $cmd in
 	#### LOCAL ####
-	swapin|swapout|terminate|update|make_exp|orchestrate|reboot|ping)
+	swapin|swapout|terminate|update|make_exp|make_normal_exp|orchestrate|reboot|ping)
 		log "uploading"
 		./run upload
 		log "executing command ./run ${1}"
@@ -198,6 +203,7 @@ experiment $exp
 
 	./run upload
 	./run make_exp
+	./run make_normal_exp
 	./run terminate
 	./run swapin
 	./run swapout

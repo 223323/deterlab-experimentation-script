@@ -98,6 +98,11 @@ if [ $is_remote == 1 ]; then
 		python /share/containers/containerize.py  $containerize_params $proj $exp $topology
 		log "making experiment done"
 		;;
+	make_normal_exp)
+		log "making experiment"
+		startexp $proj $exp $topology
+		log "making experiment done"
+		;;
 	reboot)
 		log "rebooting nodes"
 		# node_reboot -e $proj,$exp
@@ -123,7 +128,7 @@ if [ $is_remote == 1 ]; then
 else
 	case $cmd in
 	#### LOCAL ####
-	swapin|swapout|terminate|update|make_exp|orchestrate|reboot|ping)
+	swapin|swapout|terminate|update|make_exp|make_normal_exp|orchestrate|reboot|ping)
 		log "uploading"
 		./run upload
 		log "executing command ./run ${1}"
@@ -133,7 +138,7 @@ else
 	experiment)
 		./run orchestrate
 		[ $? == 0 ] || exit 1
-		log "downloading results"	
+		log "downloading results"
 		./run download @monitor
 		;;
 	upload)
@@ -153,7 +158,7 @@ else
 			node=${node%%,}
 			mkdir -p archive/$outdir/$node/
 			
-			( f_rsync_node $node ":/tmp/*.gz" ":/tmp/*.json" archive/$outdir/$node/ ) >/dev/null 2>&1 &
+			( f_rsync_node $node ":/tmp/output/*" archive/$outdir/$node/ ) >/dev/null 2>&1 &
 			conn=$(($conn+1))
 			if [ $(($conn%8 == 0)) == 1 ]; then
 				wait
@@ -198,6 +203,7 @@ experiment $exp
 
 	./run upload
 	./run make_exp
+	./run make_normal_exp
 	./run terminate
 	./run swapin
 	./run swapout

@@ -98,7 +98,7 @@ eventstreams:
         args: {}
 
       - type: trigger
-        triggers: [ { timeout: 10000 } ]
+        triggers: [ { timeout: 60000 } ]
 
       - type: event
         agent: client_agent
