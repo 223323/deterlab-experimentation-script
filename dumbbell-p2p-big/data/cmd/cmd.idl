@@ -1,0 +1,46 @@
+name: cmd
+magi_version: 1.7
+display: runs cmd
+description: runs cmd and allows starting/stopping
+execute: thread
+mainfile: cmd.py
+inherits:
+    - DispatchAgent
+
+methods:
+    - name: execute
+      help: executes cmd, waits forever for it to finish
+      args:
+        - name: args
+          type: string
+          help: arguments to cmd
+          
+    - name: startExperiment
+      help: marks a start of experiment
+      args: []
+      
+    - name: startCmd
+      help: start cmd
+      args:
+        - name: args
+          type: string
+          help: arguments to cmd
+    
+    - name: stopCmd
+      help: stop cmd
+      args: []
+      
+
+variables:
+    - name: cmd
+      type: string
+      help: command to launch
+      
+    - name: maxCmds
+      type: string
+      help: max commands
+      
+    - name: mark_time
+      type: int
+      help: mark start and end times
+      default: 0

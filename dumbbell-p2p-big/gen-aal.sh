@@ -40,7 +40,7 @@ agents:
   attack_agent:
     group: attack_group
     path: $datadir/cmd.tgz
-    execargs: { cmd: '$datadir/syn --attack-ips 10.0.xx.xxx --ip 10.0.8.1 --port 80 --threads 1 --duration 1 --attack_sleep 10000', mark_time: 1 }
+    execargs: { cmd: '$datadir/syn --attack-ips 10.0.8.1 --port 80 --threads 1', mark_time: 1 }
     # execargs: { cmd: 'python3 $datadir/test_cmd.py'}
 
 streamstarts: [ serverstream, clientstream, cleanupstream, changestream, attackstream_start ]
