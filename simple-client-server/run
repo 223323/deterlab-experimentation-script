@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
+
 . experiment.sh
 
+remote_hostname=users.isi.deterlab.net
 is_remote=0
 if [ "$(hostname)" == "$remote_hostname" ]; then
 	is_remote=1
@@ -98,7 +100,7 @@ if [ $is_remote == 1 ]; then
 		;;
 	make_normal_exp)
 		log "making experiment"
-		startexp -p $proj -e $exp $topology
+		startexp $proj $exp $topology
 		log "making experiment done"
 		;;
 	reboot)

@@ -1,6 +1,5 @@
 #!/usr/bin/env bash
 [ $# == 1 ] || exit
-
 . experiment.sh
 
 cat > $1 <<EOF
@@ -18,7 +17,7 @@ agents:
   client_agent:
     group: client_group
     path: $mods/http_client/http_client.tar.gz
-    execargs: {servers: *slist, interval: '1', sizes: 'minmax(1000,1000)'}
+    execargs: {servers: *slist, interval: '5', sizes: 'minmax(500,10000)'}
     # execargs: {servers: *slist, interval: '0.8', sizes: '1000'}
     
   monitor_agent:
@@ -26,13 +25,6 @@ agents:
     path: $mods/tcpdump/tcpdump.tar.gz
     # path: $datadir/cmd.tgz
     execargs: { }
-    
-  # client_monitor:
-    # group: client_group
-    # path: $mods/tcpdump/tcpdump.tar.gz
-    # execargs: {}
-    
-    
 
   server_agent:
     group: server_group
@@ -47,13 +39,10 @@ agents:
   attack_agent:
     group: attack_group
     path: $datadir/cmd.tgz
-    execargs: { cmd: '$datadir/syn 10.0.1.1 80 1', mark_time: 1 }
-    # execargs: { cmd: 'python3 $datadir/test_cmd.py'}
+    # execargs: { cmd: '$datadir/syn 10.0.1.2 80 1', mark_time: 1 }
+    execargs: { cmd: '$datadir/syn --attack-ips 10.0.0.xxx --ip 10.0.1.2 --port 80 --threads 1 --duration 3 --attack-sleep 10000', mark_time: 1 }
 
-# streamstarts: [ serverstream, clientstream, cleanupstream, changestream, attackstream ]
-# streamstarts: [ serverstream, clientstream, cleanupstream, attackstream ]
-streamstarts: [ serverstream, clientstream, cleanupstream, attackstream ]
-# streamstarts: [ serverstream, clientstream, cleanupstream, changestream ]
+streamstarts: [ serverstream, clientstream, cleanupstream, attackstream_start ]
 
 eventstreams:
 
@@ -88,17 +77,20 @@ eventstreams:
         
       - type: event
         agent: monitor_agent
-        method: startCollection
         trigger: start_attack
+        method: startCollection
         args: { expression: '$tcpdump_expr', tcpdump_args: '-z gzip -C 200' }
-        
+      - type: event
+        agent: attack_agent
+        method: startExperiment
+        args: {}
       - type: event
         agent: client_agent 
         method: startClient
         args: {}
 
       - type: trigger
-        triggers: [ { timeout: 60000 } ]
+        triggers: [ { timeout: 120000 } ]
 
       - type: event
         agent: client_agent
@@ -121,9 +113,17 @@ eventstreams:
         trigger: collection_done
         args: {}
   
-  attackstream:
+  attackstream_start:
       - type: trigger
         triggers: [ { event: start_attack } ] 
+        
+      - type: trigger
+        triggers: [ { timeout: 10000 } ]
+        
+      - type: trigger
+        triggers: [ { timeout: 0, target: 'attackstream' } ]
+        
+  attackstream:
         
       - type: event
         agent: attack_agent
@@ -139,7 +139,7 @@ eventstreams:
         args: {}
         
       - type: trigger
-        triggers: [ { event: clientStopped, target: cleanupstream }, { timeout: 2000 } ]
+        triggers: [ { event: clientStopped, target: cleanupstream }, { timeout: 60000 } ]
         
       - type: trigger
         triggers: [ { timeout: 0, target: 'attackstream' } ]
