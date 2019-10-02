@@ -1,6 +1,7 @@
 export user=ftnunsaa
 export proj=DOSTRACE
-export exp=dumbbell-lan-big
+export exp=tutor-2
+export desc='try something'
 # export containerize_params="--pnode-type bpc2133 --packing=12"
 export containerize_params="--pnode-type MicroCloud,dl380g3 --packing=12"
 export name='dumbell-lan-big'

@@ -144,6 +144,98 @@ eventstreams:
       - type: trigger
         triggers: [ { target: 'attackstream' } ]
         
+  attackstream3:
+        
+      - type: event
+        agent: attack_agent
+        method: startCmd
+        args: {}
+        
+      - type: trigger
+        triggers: [ { event: clientStopped, target: cleanupstream }, { timeout: 8000 } ]
+        
+      - type: event
+        agent: attack_agent
+        method: stopCmd
+        args: {}
+        
+  attackstream2:
+        
+      - type: event
+        agent: attack_agent
+        method: startCmd
+        args: {}
+        
+      - type: trigger
+        triggers: [ { event: clientStopped, target: cleanupstream }, { timeout: 15000 } ]
+        
+      - type: event
+        agent: attack_agent
+        method: stopCmd
+        args: {}
+   
+      - type: trigger
+        triggers: [ { event: clientStopped, target: cleanupstream }, { timeout: 80000 } ]
+        
+        
+        ##########################
+        
+       
+      - type: event
+        agent: attack_agent
+        method: startCmd
+        args: {}
+        
+      - type: trigger
+        triggers: [ { event: clientStopped, target: cleanupstream }, { timeout: 15000 } ]
+        
+      - type: event
+        agent: attack_agent
+        method: stopCmd
+        args: {}
+        
+      - type: trigger
+        triggers: [ { event: clientStopped, target: cleanupstream }, { timeout: 60000 } ]
+        
+        
+        ##########################
+        
+        
+      - type: event
+        agent: attack_agent
+        method: startCmd
+        args: {}
+        
+      - type: trigger
+        triggers: [ { event: clientStopped, target: cleanupstream }, { timeout: 3000 } ]
+        
+      - type: event
+        agent: attack_agent
+        method: stopCmd
+        args: {}
+        
+      - type: trigger
+        triggers: [ { event: clientStopped, target: cleanupstream }, { timeout: 50000 } ]
+        
+        
+        ##########################
+        
+      - type: event
+        agent: attack_agent
+        method: startCmd
+        args: {}
+        
+      - type: trigger
+        triggers: [ { event: clientStopped, target: cleanupstream }, { timeout: 15000 } ]
+        
+      - type: event
+        agent: attack_agent
+        method: stopCmd
+        args: {}
+        
+      - type: trigger
+        triggers: [ { event: clientStopped, target: cleanupstream }, { timeout: 50000 } ]
+        
   changestream:
       - type: event
         agent: client_agent

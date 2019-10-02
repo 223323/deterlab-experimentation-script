@@ -12,6 +12,6 @@ fi
 
 # execute on router-1
 sudo ip route del 10.0.0.0/8
-sudo ip route add 10.0.8.0/24   via 10.0.11.2
-sudo ip route add 10.0.9.0/24   via 10.0.11.2
-sudo ip route add 10.0.10.0/24  via 10.0.11.2
+sudo ip route add 10.0.5.0/24   via 10.0.8.2
+sudo ip route add 10.0.3.0/24   via 10.0.8.2
+sudo ip route add 10.0.0.0/24 	via 10.0.8.2

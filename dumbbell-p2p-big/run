@@ -1,23 +1,46 @@
 #!/usr/bin/env bash
 
+function join { echo "$@" | tr ' ' ','; }
 . experiment.sh
 
-remote_hostname=users.isi.deterlab.net
+#############################
+export aal=orchestrator.aal
+export topology=topology.tcl
+
+export remote_hostname=users.isi.deterlab.net
+export sshaddr="$user@$remote_hostname"
+export home=/users/$user
+export deterhome="$sshaddr:$home"
+export dns=$exp.$proj
+
+export exppath="experiments/$exp"
+export expdir=$home/$exppath
+export expshare=/proj/$proj/exp/$exp
+export sshpath=$sshaddr:$expdir
+export sshshare=$sshaddr:$expshare
+
+export datadir=$expdir/data
+export outdir=$expdir/output
+export mods=/share/magi/modules
+#############################
+
+oifs="$IFS"
+cmd="${cmd:-$1}"
 is_remote=0
 if [ "$(hostname)" == "$remote_hostname" ]; then
 	is_remote=1
-	# echo "--- entering $remote_hostname ---"
 	PATH=$PATH:/usr/testbed/bin/
 fi
 
 f_ping() {
-	for node in $nodes; do
-		node=${node%%,}
+	f_resolve_nodes "${1:-@nodes}"
+	IFS=','
+	for node in $nodes2; do
 		echo ""
 		echo "-------------"
-		echo "pinging $node"
+		echo "pinging $node.$dns"
 		echo "-------------"
-		ping -c 1 $node.$exp.$proj
+		ping -c 1 $node.$dns
 		if [ $? != 0 ]; then
 			echo "ping fail on $node"
 			return 1
@@ -31,43 +54,182 @@ f_ping() {
 }
 
 f_resolve_nodes() {
-	[ -z "$1" ] && nodes2="$nodes" && return
+	[ -z "$1" ] && nodes2="$monitor" && return
 	[[ "$1" == @* ]] && eval "nodes2=\"\$${1#@}\"" || nodes2="$1"
 }
 
 f_ssh2() {
-	shell=
-	if [ _$3 == _shell ]; then
-		shell="-t"
-	fi
-	
-	if [ "$2" == 'bash -i' ]; then
-		ssh -t $ssh_addr "cd $home/$exp_path; ssh -o StrictHostKeyChecking=no \
-					-o LogLevel=ERROR -o UserKnownHostsFile=/dev/null $shell $1.$exp.$proj \"cd /tmp/; bash -i\"" 
+	local shell=
+	local shell1=
+	local shell2=
+	[ _$3 == _shell ] && shell="-t"
+	sshcmd="cd $expdir; . run; ssh -o StrictHostKeyChecking=no "
+	sshcmd+="-o LogLevel=ERROR -o UserKnownHostsFile=/dev/null $shell $1.$dns "
+	[ "$2" == 'bash -i' ] && shell1='-t'
+	[ _$3 != _shell ] && shell2='>/dev/null 2>/dev/null'
+	ssh $shell1 $sshaddr "$sshcmd \"cd /tmp/; $2\"" $shell2
+}
+
+
+f_rsync_node() {
+	rsynccmd="ssh -A $sshaddr ssh -o StrictHostKeyChecking=no"
+	rsynccmd+="	-o UserKnownHostsFile=/dev/null"
+	rsync -azvvP --ignore-missing-args -e "$rsynccmd" $@
+}
+
+f_rsync() {
+	rsync -zr --ignore-missing-args $@
+}
+
+f_gen_aal() {
+	ext=${gen_aal##*.}
+	if [ $ext == py ]; then
+		py_file=generate-aal.py
+		f_python
+		python2 $py_file $gen_aal > $aal
+		rv=$?
+		rm $py_file
+		return $rv
+	elif [ $ext == sh ]; then
+		bash $gen_aal $aal
 	else
-		if [ _$3 == _shell ]; then
-			ssh $ssh_addr "cd $home/$exp_path; ssh -o StrictHostKeyChecking=no \
-					-o LogLevel=ERROR -o UserKnownHostsFile=/dev/null $shell $1.$exp.$proj \"cd /tmp/; $2\""
-		else
-			ssh $ssh_addr "cd $home/$exp_path; ssh -o StrictHostKeyChecking=no \
-					-o LogLevel=ERROR -o UserKnownHostsFile=/dev/null $shell $1.$exp.$proj \"cd /tmp/; $2\"" >/dev/null 2>/dev/null
-		fi
+		cp $gen_aal $aal
 	fi
 }
 
-f_rsync_node() {
-	node=$1
-	shift
-	rsync -azvvP --ignore-missing-args -e "ssh -A $ssh_addr ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null" "$user@$node.$exp.$proj"$@ 
+f_python() {
+py_file=$(mktemp)
+cat > $py_file <<EOF
+def repl(s):
+	import os,re
+	for w in re.findall(r'\\\$(\w+)',s):
+		if w in os.environ:
+			s = s.replace('$'+w, os.environ[w])
+	return s
+	
+from collections import OrderedDict 
+def repl_all(d,t=False):
+	for k,v in enumerate(d) if t else d.items():
+		if type(v) is str: d[k] = repl(v)
+		elif type(v) in (OrderedDict,list):
+			repl_all(d[k],type(v)==list)
+
+class manager:
+	cnt,tr = 0,set()
+	def __init__(self, opts, plt=None, hook=None, defs={}):
+		self.opts,self.defs = opts, defs
+		self.plt,self.hook = plt, hook
+		self.a, self.p = [], []
+	
+	def new(self, *args, **kwargs):
+		o = type('/',(),{'p':self,'arr':[]})()
+		for k in kwargs.keys():
+			if k not in self.opts: raise Exception(k+' bad argument')
+		o.v = OrderedDict((k,kwargs.get(k,self.defs.get(k,{}))) for k in self.opts)
+		o.d = self.defs
+		o.i = len(self.a)
+		for i,j in enumerate(args): o.v[self.opts[i]] = j
+		repl_all(o.v)
+		self.a.append(o)
+		h = o
+		if self.hook:
+			h = self.hook(o)
+			if h != self: h.p,h.v = self,o.v
+		return h
+	
+	def wait(self):
+		v = self.a[-1].v
+		if not v['trigger']: v['trigger']='trig%d' % manager.cnt
+		manager.cnt+=1
+		trigger(v['trigger'])
+	
+	def __enter__(s,*args): 
+		if len(args) == 3 and args[1]: raise args[1]
+		v = s.a[-1].v['name'] in [i.v['name'] for i in s.a[:-1]]
+		if v:
+			del s.a[-1]
+		elif args:
+			s.a = [s.a[-1]]+s.a[:-1]
+	
+	__exit__ = __enter__
+	__call__ = new
+
+def tab(a,b=0,lv=[0]):
+	lv[0] += a
+	return ' '*(lv[0]+b)
+
+def plt(f,ind=0):
+	s=''
+	tab(4)
+	for i,(k,v) in enumerate(f):
+		if type(v) is str and not v: continue
+		s+=tab(0, (ind if i!=0 else 0))+k+': '
+		s+=(repr(v) if type(v) is str and v.find(' ') != -1 else str(v))+'\n'
+	tab(-4)
+	return s
+	
+def blt(a):
+	return '\n'.join(j for j in [o.p.plt(o) for o in a if o.p.plt] if j)
+	
+def skp(o,s={},ind=0):
+	o.v.update(s)
+	return tab(4)+o.v['name']+':\n'+plt(list(o.v.items())[1:])+tab(-4,4)
+	
+def stream_append(o):
+	stream.a[-1].arr.append(o)
+	return o.p
+
+def get_triggers(o):
+	r, l=[],o.v['trigger']
+	if type(l) is not list: l = [list(o.v.values())]
+	for t in l:
+		n = type(t[0]) == int
+		if n: t[0] *= 1000
+		a = {['event','timeout'][n]: t[0]}
+		if len(t) > 1 and t[1]: 
+			manager.tr.add(t[1])
+			a['target'] = t[1]
+		if len(t) > 2 and t[2]: a['args'] = t[2]
+		r.append(a)
+	return r
+
+groups = manager(['name','nodes'], 
+	lambda o: tab(4)+o.v['name']+': ' +str(o.v['nodes'])+'\n'+tab(-4) )
+
+agents = manager(['name','group','path','execargs'], 
+	lambda o: skp(o, {'group': o.v['group'].v['name']}),
+	lambda s: manager(['method', 'args', 'trigger'], lambda o: plt([
+		('- type','event'), ('agent',o.p.v['name']),
+		]+list(o.v.items()),2), stream_append, {'trigger':''}), {'execargs':{}})
+	
+stream = manager(['name','start'],
+	lambda o: tab(4)+o.v['name']+':\n'+blt(o.arr)+tab(-4) 
+		if o.v['name'] in manager.tr or o.v['start'] else '', lambda o:o.p)
+
+trigger = manager(['trigger','target','args'], 
+	lambda o: plt([('- type','trigger'), ('triggers', get_triggers(o))],2), stream_append)
+def loop(t=0): trigger(t, stream.a[-1].v['name'])
+def generate():
+	stream.a=sorted(stream.a, key=lambda o:o.i)
+	blt(stream.a)
+	for (i,j) in [('groups',groups),('agents',agents),('eventstreams',stream)]:
+		print(i+':\n'+''.join(blt(j.a)))
+	print('streamstarts: [ '+', '.join(i.v['name'] 
+		for i in stream.a if i.v['start'] == True)+' ]')
+
+# load orchestration
+import sys
+exec(open(sys.argv[1]).read())
+generate()
+EOF
 }
 
 show_help=0
 
-cmd="$1"
 log() {
 	prefix=local
 	[ $is_remote == 0 ] || prefix=remote
-	echo "[$prefix/$cmd] $1"
+	echo "[$prefix/$cmd] $@"
 }
 
 if [ $is_remote == 1 ]; then
@@ -91,16 +253,19 @@ if [ $is_remote == 1 ]; then
 		;;
 	ping)
 		log "pinging nodes from gen-aal script"
-		f_ping
+		f_ping $2
 		;;
-	make_exp)
+	magi_ping)
+		python /share/magi/current/magi_status.py -p $proj -e $exp $2
+		;;
+	make_cont_exp)
 		log "making experiment"
-		python /share/containers/containerize.py  $containerize_params $proj $exp $topology
+		python /share/containers/containerize.py $containerize_params $proj $exp $topology
 		log "making experiment done"
 		;;
-	make_normal_exp)
+	make_norm_exp)
 		log "making experiment"
-		startexp $proj $exp $topology
+		startexp -p $proj -e $exp $topology
 		log "making experiment done"
 		;;
 	reboot)
@@ -111,12 +276,13 @@ if [ $is_remote == 1 ]; then
 		sleep 60
 		./run swapin
 		;;
+	gen-aal)
+		f_gen_aal
+		;;
 	orchestrate)
-		log "generating AAL"
-		bash $gen_aal $aal
 		log "pinging nodes from gen-aal script"
 		f_ping
-		[ $? != 0 ] && log "pinging failed (wait for all nodes to be ready and accessible)" && exit 1
+		[ $? != 0 ] && log "pinging failed" && exit 1
 		python /share/magi/current/magi_orchestrator.py -p $proj -e $exp --events $aal
 		[ $? == 0 ] || exit 1
 		log "orchestrator DONE"
@@ -128,67 +294,95 @@ if [ $is_remote == 1 ]; then
 else
 	case $cmd in
 	#### LOCAL ####
-	swapin|swapout|terminate|update|make_exp|make_normal_exp|orchestrate|reboot|ping)
+	swapin|swapout|terminate|update|make_cont_exp|make_norm_exp|orchestrate|\
+	reboot|ping|magi_ping)
 		log "uploading"
 		./run upload
-		log "executing command ./run ${1}"
-		ssh -t $ssh_addr "cd $exp_dir; ./run ${1}"
-		[ $? == 0 ] || exit 1
+		ssh -t $sshaddr "cd $expdir; ./run $@" || exit 1
+		;;
+	magi_reboot)
+		msg="bash -c '( ( sudo pkill mongodb;"
+		msg+="sudo rm -r /var/log/magi/db;"
+		msg+="sudo python /share/magi/current/magi_bootstrap.py ) &>/dev/null & )'"
+		./run ssh "${2:-@nodes}" "$msg" $3
+		;;
+	magi_status)
+		cnt=`./run ssh "${2:-@nodes}" "ps aux | grep magi" shell | grep magi_daemon | wc -l`
+		f_resolve_nodes "${2:-@nodes}"
+		node_cnt=`echo $nodes2 | wc -w`
+		echo $(($node_cnt-$cnt)) failing
+		;;
+	gen-aal)
+		f_gen_aal || exit 1
 		;;
 	experiment)
-		./run orchestrate
-		[ $? == 0 ] || exit 1
-		log "downloading results"
-		./run download @monitor
+		f_gen_aal || exit 1
+		./run orchestrate || exit 1
+		./run download @monitor || exit 1
 		;;
 	upload)
-		rsync -zr --delete --exclude archive --exclude data ./ $deterhome/$exp_path/
+		rsync -zr --delete --exclude archive --exclude data ${2:-./} $sshpath/
 		if [ -d data ]; then
-			rsync -zr data $deterhome/$exp_path/
+			rsync -zr data $sshpath/
 		fi
 		;;
 	download)
-		outdir=output-$(date +%d-%m-%y-%H:%M)
-		mkdir -p archive/$outdir
-		
+		localoutdir=archive/$name-$(date +%d.%m.%y_%H:%M)
+		mkdir -p "$localoutdir"
+		log "downloading results"
+		f_rsync $sshshare/experiment.conf "$localoutdir"
+		cp $aal $gen_aal "$localoutdir"
 		f_resolve_nodes "$2"
-		conn=0
-		rsync -zr --ignore-missing-args $deterhome/$exp_path/$aal $deterhome/$exp_path/data  archive/$outdir/
+		IFS=','
 		for node in $nodes2; do
-			node=${node%%,}
-			mkdir -p archive/$outdir/$node/
-			
-			( f_rsync_node $node ":/tmp/output/*" archive/$outdir/$node/ ) >/dev/null 2>&1 &
-			conn=$(($conn+1))
-			if [ $(($conn%8 == 0)) == 1 ]; then
-				wait
-			fi
+			mkdir -p "$localoutdir/$node/"
+			echo "DL " $node
+			( f_rsync_node "$user@$node.$dns:/tmp/output/*" \
+				"$localoutdir/$node/" ) >/dev/null 2>&1 &
+			[ $(jobs | wc -l) -ge 5 ] && wait -n
 		done
 		wait
+		log "results downloaded in $localoutdir"
+		;;
+	portforward)
+		ssh -f $user@$remote_hostname -L $3:$2.$dns:$4 -N
 		;;
 	ssh)
 		if [ $# -ge 2 ]; then
-			interactive="bash -i"
-			ssh_cmd="$interactive"
+			ssh_cmd="bash -i"
 			shell="shell"
 			if [ $# -ge 3 ]; then
 				ssh_cmd="$3"
 				shell=
+				[ _$4 == _shell ] && shell="shell" && do_wait=true
+				[ _$4 == _wait ] && do_wait=true
 			fi
-			[ _$4 == _shell ] && shell="shell"
 			
+			res=$(mktemp -d)
 			f_resolve_nodes "$2"
+			IFS=','
 			for node in $nodes2; do
-				node=${node%%,}
 				log "ssh to node $node: $ssh_cmd";
-				if [ ! -z $shell ]; then
+				if [ ! -z $shell ] && [ "$ssh_cmd" == "bash -i" ]; then
 					f_ssh2 $node "$ssh_cmd" $shell
 				else
-					f_ssh2 $node "$ssh_cmd" &
+					( f_ssh2 $node "$ssh_cmd" $shell > $res/$node ) &
 				fi
+				[ $(jobs | wc -l) -ge 5 ] && wait -n
 			done
+			
+			[ $do_wait ] && wait
+			if [ ! -z $shell ]; then
+				IFS="$oifs"
+				for i in `ls $res`; do
+					echo ""
+					log `basename $i`
+					cat $res/$i
+				done
+			fi
+			rm -r $res
 		else
-			ssh -t $ssh_addr "cd $home/$exp_path; bash -i"
+			ssh -t $sshaddr "cd $expdir; bash --init-file <(echo \". \$HOME/.bashrc;. run\")"
 		fi
 		;;
 	*)
@@ -197,22 +391,32 @@ else
 	esac
 fi
 
-if [ $show_help == 1 ]; then
+if [ $# != 0 ] && [ $show_help == 1 ]; then
 	cat <<EOF
 experiment $exp
 
-	./run upload
-	./run make_exp
-	./run make_normal_exp
-	./run terminate
-	./run swapin
-	./run swapout
-	./run reboot
-	./run ping
-	./run orchestrate
-	./run experiment
-	./run download [<node-name>|<@group>]
+	./run upload			=> upload files
+	./run make_cont_exp 	=> make containerized experiment
+	./run make_norm_exp		=> make normal experiment
+	./run terminate 		=> destroy experiment
+	./run swapin			=> start experiment nodes
+	./run swapout			=> kill experiment nodes
+	./run reboot			=> restart nodes
+	./run ping				=> ping all nodes with ping command
+	./run orchestrate		=> run only magi orchestrator
+	./run experiment		=> run magi orchestrator and download results
+	./run magi_ping 		=> magi_status.py: ping all nodes
+	./run magi_ping -r 		=> magi_status.py: reboot
+	./run magi_status 		=> ssh check magi nodes
+	./run magi_reboot 		=> ssh reboot magi nodes
+	./run download [<node-name>|<@group>]	=> download results from multiple nodes
 	./run ssh [<node-name>|<@group>] [<command>] [shell]
-	./run ssh  => logs in to users.isi.deterlab.net
+	./run ssh <node-name>						 => connect to single node in interactive mode
+	./run ssh [<node-name>|<@group>] [<command>] => send commands without getting their output
+	./run ssh [<node-name>|<@group>] [<command>] shell => send commands with receiving output
+	./run portforward <node-name> <local-port> <remote-port>
+	./run ssh  			=> logs in to users.isi.deterlab.net in interactive mode
 EOF
 fi
+
+
