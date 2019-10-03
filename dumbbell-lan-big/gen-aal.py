@@ -4,6 +4,10 @@ monitor=repl('$monitor').split(',')
 servers=repl('$servers').split(',')
 attackers=repl('$attackers').split(',')
 
+
+with open('data/syn_timings.txt', 'w') as f:
+	f.write(' '.join([ str(int(random.expovariate(1/40.0))*1000) for i in range(500)]) )
+
 # GROUPS
 client_group = groups.new('client_group', clients)
 monitor_group = groups.new('monitor_group', monitor)
@@ -19,7 +23,8 @@ collect_agent = agents.new('collect_agent', group=monitor_group, path='$datadir/
 	execargs={'cmd': './collect.sh', 'cwd':'$expdir'})
 attack_agent = agents.new('attack_agent', group=attack_group, path='$datadir/cmd.tgz',
 	execargs={'cmd': '$datadir/syn --attack-ips 10.0.xxx.xxx --ip 10.0.1.3 '+
-		'--port 80 --threads 1 --duration 30 --attack-sleep 1000', 'mark_time': 1 })
+		'--port 80 --threads 1 --duration 30 --attack-sleep 1000 --attack-sleep-timings $datadir/syn_timings.txt', 
+		'mark_time': 1 })
 
 def on_off_attacks(lst):
 	for (a,b) in lst:
@@ -48,31 +53,28 @@ with stream('clientstream',True):
 	trigger(500)
 	client_agent('stopClient', trigger='clientStopped')
 	
-	monitor_agent('stopCollection').wait()
+	monitor_agent('stopCollection', trigger='cleanup')
 	
-	collect_agent('execute', {'args':'postprocess'})
-	trigger(0,'cleanupstream')
-
 with stream('attackstream_start',True):
 	trigger('start_attack')
-	trigger(8, 'attackstream2')
-
-	with stream('attackstream'):
-		on_off_attacks( [(5,25), (5,50)] )
-		loop()
+	trigger(8, 'attackstream')
 	
-	with stream('attackstream2'):
-		on_off_attacks( [(15,80), (15, 60), (3, 50), (15,50)] )
+	with stream('attackstream'):
+		on_off_attacks( [(5,25)] )
 		loop()
 
-with stream('cleanupstream'):
+with stream('cleanupstream', True):
+	trigger('cleanup')
+	
+	collect_agent('execute', {'args':'postprocess'}).wait()
 	trigger('serverStopped','exit')
 
+'''
 with stream('changestream', True):
 	trigger('clientStarted')
 	for i in range(10):
 		client_agent('changeTraffic', args={'stepsize':random.randint(100,1000)})
 		trigger(random.randint(1,10))
 	loop()
-
+'''
 
