@@ -297,6 +297,9 @@ if [ $is_remote == 1 ]; then
 else
 	case $cmd in
 	#### LOCAL ####
+	info)
+		echo experiment name: $name
+		;;
 	swapin|swapout|terminate|update|make_cont_exp|make_norm_exp|orchestrate|\
 	reboot|ping|magi_ping)
 		log "uploading"

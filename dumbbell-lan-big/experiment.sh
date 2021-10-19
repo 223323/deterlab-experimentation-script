@@ -3,10 +3,16 @@ export proj=DOSTRACE
 export exp=dumbbell-lan-big
 # export containerize_params="--pnode-type bpc2133 --packing=12"
 export containerize_params="--pnode-type MicroCloud,dl380g3 --packing=12"
+export allow_attackers=0
+
 export name='dumbell-lan-big'
+
+if [ $allow_attackers == 1 ]; then
+	export name=$name-with-attackers
+fi
+
 export gen_aal=gen-aal.py
 
-export allow_attackers=1
 
 if [ $allow_attackers == 0 ]; then
 
